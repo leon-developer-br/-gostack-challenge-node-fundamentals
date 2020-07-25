@@ -1,35 +1,59 @@
+/* eslint-disable @typescript-eslint/camelcase */
+import { getRepository, getCustomRepository } from 'typeorm';
 import TransactionsRepository from '../repositories/TransactionsRepository';
 import Transaction from '../models/Transaction';
+import Category from '../models/Category';
+import AppError from '../errors/AppError';
 
-interface Request {
+export interface Request {
   title: string;
   value: number;
   type: 'income' | 'outcome';
+  category: string;
 }
 
 class CreateTransactionService {
-  private transactionsRepository: TransactionsRepository;
+  public async execute({
+    title,
+    value,
+    type,
+    category,
+  }: Request): Promise<Transaction> {
+    const transactionsRepository = getCustomRepository(TransactionsRepository);
+    const categoriesRepository = getRepository(Category);
 
-  constructor(transactionsRepository: TransactionsRepository) {
-    this.transactionsRepository = transactionsRepository;
-  }
-
-  public execute({ title, value, type }: Request): Transaction {
-    if (!value || !type) {
-      throw Error('Invalid transaction fields');
+    if (!title || !value || !type || !category) {
+      throw new AppError('Invalid transaction fields');
     }
 
     if (!['income', 'outcome'].includes(type)) {
-      throw Error('Invalid balance type for transaction');
+      throw new AppError('Invalid balance type for transaction');
     }
 
-    const balance = this.transactionsRepository.getBalance();
+    const balance = await transactionsRepository.getBalance();
 
     if (type === 'outcome' && balance.total < value) {
-      throw new Error('Not enough balance');
+      throw new AppError('Not enough balance');
     }
 
-    return this.transactionsRepository.create({ title, value, type });
+    let existingCategory = await categoriesRepository.findOne({
+      where: { title: category },
+    });
+
+    if (!existingCategory) {
+      existingCategory = categoriesRepository.create({ title: category });
+      await categoriesRepository.save(existingCategory);
+    }
+
+    const transaction = transactionsRepository.create({
+      title,
+      value,
+      type,
+      category_id: existingCategory.id,
+    });
+
+    await transactionsRepository.save(transaction);
+    return transaction;
   }
 }
 
